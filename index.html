@@ -362,19 +362,13 @@ const keys={};
 let isVR=false,gyroEnabled=false,gotOrientation=false,recenterPending=false;
 const D2R=Math.PI/180,yawFix=new THREE.Quaternion(),deviceQ=new THREE.Quaternion(),tmpEuler=new THREE.Euler(),qBack=new THREE.Quaternion(-Math.SQRT1_2,0,0,Math.SQRT1_2);
 const stereo=new THREE.StereoCamera();stereo.aspect=.5;stereo.eyeSep=.064;
-const eyeRT=new THREE.WebGLRenderTarget(window.innerWidth/2,window.innerHeight);
-const distMat=new THREE.ShaderMaterial({uniforms:{t:{value:eyeRT.texture},k:{value:.25},sx:{value:0}},
+const eyeRT=new THREE.WebGLRenderTarget(window.innerWidth,window.innerHeight,{depthBuffer:true,stencilBuffer:false});
+const distMat=new THREE.ShaderMaterial({uniforms:{t:{value:eyeRT.texture},k:{value:.12}},
   vertexShader:'varying vec2 v;void main(){v=uv;gl_Position=vec4(position.xy,0.,1.);}',
-  fragmentShader:['uniform sampler2D t;uniform float k;uniform float sx;varying vec2 v;','void main(){vec2 c=v*2.-1.;vec2 d=c*(1.+k*dot(c,c));vec2 u=d*.5+.5+vec2(sx,0.);','gl_FragColor=(u.x<0.||u.x>1.||u.y<0.||u.y>1.)?vec4(0.,0.,0.,1.):texture2D(t,u);','#include <tonemapping_fragment>','#include <colorspace_fragment>','}'].join('\n')});
+  fragmentShader:['uniform sampler2D t;uniform float k;varying vec2 v;','void main(){float side=step(0.5,v.x);vec2 q=vec2(fract(v.x*2.0),v.y);vec2 c=q*2.0-1.0;float r2=dot(c,c);vec2 d=c*(1.0+k*r2);vec2 u=d*0.5+0.5;u.x=u.x*0.5+side*0.5;','float lens=1.0-smoothstep(0.94,1.02,r2);vec4 col=texture2D(t,u);gl_FragColor=vec4(col.rgb*lens,1.0);','#include <tonemapping_fragment>','#include <colorspace_fragment>','}'].join('\n'),depthTest:false,depthWrite:false});
 const qScene=new THREE.Scene();qScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2),distMat));const qCam=new THREE.OrthographicCamera(-1,1,1,-1,0,1);
 function resize(){cam.aspect=innerWidth/innerHeight;cam.fov=isVR?90:58;cam.updateProjectionMatrix();stereo.aspect=.5;ren.setSize(innerWidth,innerHeight);updateEyeRTSize()}
-function updateEyeRTSize(){
-  if(isVR){
-    eyeRT.setSize(Math.max(2,Math.floor(innerWidth/2)),Math.max(2,innerHeight));
-  } else {
-    eyeRT.setSize(Math.max(2,Math.floor(innerWidth/2)),Math.max(2,innerHeight));
-  }
-}
+function updateEyeRTSize(){eyeRT.setSize(Math.max(2,innerWidth),Math.max(2,innerHeight));}
 function renderRoom(){
   // Normal monoscopic view
   if(!isVR){
@@ -394,16 +388,16 @@ function renderRoom(){
   stereo.aspect=0.5;
   stereo.eyeSep=0.064;
   stereo.update(cam);
-  ren.setRenderTarget(null);
+  // Render both eye cameras into separate halves of an offscreen texture.
+  ren.setRenderTarget(eyeRT);
   ren.setScissorTest(true);
-  ren.setViewport(0,0,w,h);
-  ren.setScissor(0,0,w,h);
-  ren.clear(true,true,true);
+  ren.setViewport(0,0,w,h);ren.setScissor(0,0,w,h);ren.clear(true,true,true);
   ren.render(sA,stereo.cameraL);
-  ren.setViewport(w,0,innerWidth-w,h);
-  ren.setScissor(w,0,innerWidth-w,h);
+  ren.setViewport(w,0,innerWidth-w,h);ren.setScissor(w,0,innerWidth-w,h);
   ren.render(sA,stereo.cameraR);
-  ren.setScissorTest(false);
+  // Present lens-shaped, barrel-distorted views with black outside each lens.
+  ren.setRenderTarget(null);ren.setScissorTest(false);ren.setViewport(0,0,innerWidth,innerHeight);
+  ren.render(qScene,qCam);
 }
 function moveCamera(dt){
   const f=Number(keys.KeyW||keys.ArrowUp)-Number(keys.KeyS||keys.ArrowDown),s2=Number(keys.KeyD||keys.ArrowRight)-Number(keys.KeyA||keys.ArrowLeft);if(!f&&!s2)return;
@@ -422,9 +416,10 @@ window.startTraining=()=>{restart();$('ui').classList.add('closed')};
 window.releaseHeldItem=()=>{if(!gbGrasp)return;gbGrasp=false;inst[0].lock=0;gb.rotation.z=-.25;gb.scale.set(1,1,1);if(ti<3){ti=0;tasks.forEach(k=>k.t=0)}say('Tissue released. Grasp the fundus again.')};
 window.enableGyro=async()=>{
   if(gyroEnabled)return;const O=window.DeviceOrientationEvent;
+  if(!O){say('This browser does not expose motion sensors. Try Chrome on Android over HTTPS.');return}
   if(O&&typeof O.requestPermission==='function'){try{const p=await O.requestPermission();if(p!=='granted'){say('Motion permission was denied.');return}}catch(e){say('Could not enable motion controls.');return}}
-  gyroEnabled=true;gotOrientation=false;recenterPending=true;$('gyroBtn').textContent='Gyro: ON';
-  setTimeout(()=>{if(!gotOrientation){gyroEnabled=false;$('gyroBtn').textContent='Enable gyro';say('No device orientation data received. Use a motion-enabled phone over HTTPS, or WASD to move.')}},1800)};
+  gyroEnabled=true;gotOrientation=false;recenterPending=true;$('gyroBtn').textContent='Gyro: waiting…';
+  setTimeout(()=>{if(gotOrientation){$('gyroBtn').textContent='Gyro: ON'}else{gyroEnabled=false;$('gyroBtn').textContent='Enable gyro';say('No motion data received. Allow motion access and open this page on your phone over HTTPS.')}} ,2500)};
 window.toggleVRBox=async()=>{
   isVR=!isVR;document.body.classList.toggle('vr',isVR);
   if(isVR)updateEyeRTSize();
