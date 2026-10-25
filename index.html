@@ -362,20 +362,30 @@ const keys={};
 let isVR=false,gyroEnabled=false,gotOrientation=false,recenterPending=false;
 const D2R=Math.PI/180,yawFix=new THREE.Quaternion(),deviceQ=new THREE.Quaternion(),tmpEuler=new THREE.Euler(),qBack=new THREE.Quaternion(-Math.SQRT1_2,0,0,Math.SQRT1_2);
 const stereo=new THREE.StereoCamera();stereo.aspect=.5;stereo.eyeSep=.064;
-const eyeRT=new THREE.WebGLRenderTarget(512,512);
+const eyeRT=new THREE.WebGLRenderTarget(window.innerWidth/2,window.innerHeight,{types:[Float32Type,UnsignedByteType]});
 const distMat=new THREE.ShaderMaterial({uniforms:{t:{value:eyeRT.texture},k:{value:.25},sx:{value:0}},
   vertexShader:'varying vec2 v;void main(){v=uv;gl_Position=vec4(position.xy,0.,1.);}',
   fragmentShader:['uniform sampler2D t;uniform float k;uniform float sx;varying vec2 v;','void main(){vec2 c=v*2.-1.;vec2 d=c*(1.+k*dot(c,c));vec2 u=d*.5+.5+vec2(sx,0.);','gl_FragColor=(u.x<0.||u.x>1.||u.y<0.||u.y>1.)?vec4(0.,0.,0.,1.):texture2D(t,u);','#include <tonemapping_fragment>','#include <colorspace_fragment>','}'].join('\n')});
 const qScene=new THREE.Scene();qScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2),distMat));const qCam=new THREE.OrthographicCamera(-1,1,1,-1,0,1);
-function resize(){cam.aspect=innerWidth/innerHeight;cam.fov=isVR?90:58;cam.updateProjectionMatrix();ren.setSize(innerWidth,innerHeight)}
+function resize(){cam.aspect=innerWidth/innerHeight;cam.fov=isVR?90:58;cam.updateProjectionMatrix();ren.setSize(innerWidth,innerHeight);updateEyeRTSize()}
+function updateEyeRTSize(){
+  if(isVR){
+    eyeRT.setSize(Math.max(2,Math.floor(innerWidth/2)),Math.max(2,innerHeight));
+  } else {
+    eyeRT.setSize(Math.max(2,Math.floor(innerWidth/2)),Math.max(2,innerHeight));
+  }
+}
 function renderRoom(){
   if(!isVR){ren.setViewport(0,0,innerWidth,innerHeight);ren.setScissorTest(false);ren.render(sA,cam);return}
   const w=Math.floor(innerWidth/2),h=innerHeight,pr=ren.getPixelRatio();
-  eyeRT.setSize(Math.max(2,w*pr),Math.max(2,h*pr));cam.updateMatrixWorld();stereo.update(cam);
-  distMat.uniforms.k.value=Number($('lens').value)/100*.5;const off=(Number($('align').value)-5)*.012;
+  eyeRT.setSize(Math.max(2,Math.floor(w*pr)),Math.max(2,Math.floor(h*pr)));
+  cam.updateMatrixWorld();stereo.update(cam);
+  distMat.uniforms.k.value=Number($('lens').value)/100*.55;const off=(Number($('align').value)-7.5)*.012;
   [stereo.cameraL,stereo.cameraR].forEach((c,i)=>{
     ren.setRenderTarget(eyeRT);ren.render(sA,c);ren.setRenderTarget(null);
-    distMat.uniforms.sx.value=i?-off:off;ren.setScissorTest(true);ren.setViewport(i*w,0,w,h);ren.setScissor(i*w,0,w,h);ren.render(qScene,qCam)});
+    distMat.uniforms.sx.value=i?-off:off;
+    ren.setScissorTest(true);
+    ren.setViewport(i*w,0,w,h);ren.setScissor(i*w,0,w,h);ren.render(qScene,qCam)});
   ren.setScissorTest(false)}
 function moveCamera(dt){
   const f=Number(keys.KeyW||keys.ArrowUp)-Number(keys.KeyS||keys.ArrowDown),s2=Number(keys.KeyD||keys.ArrowRight)-Number(keys.KeyA||keys.ArrowLeft);if(!f&&!s2)return;
@@ -398,7 +408,9 @@ window.enableGyro=async()=>{
   gyroEnabled=true;gotOrientation=false;recenterPending=true;$('gyroBtn').textContent='Gyro: ON';
   setTimeout(()=>{if(!gotOrientation){gyroEnabled=false;$('gyroBtn').textContent='Enable gyro';say('No device orientation data received. Use a motion-enabled phone over HTTPS, or WASD to move.')}},1800)};
 window.toggleVRBox=async()=>{
-  isVR=!isVR;document.body.classList.toggle('vr',isVR);resize();
+  isVR=!isVR;document.body.classList.toggle('vr',isVR);
+  if(isVR)updateEyeRTSize();
+  resize();
   if(isVR&&!gyroEnabled)await window.enableGyro();
   if(isVR){setTimeout(()=>{recenterPending=true},3000);try{await document.documentElement.requestFullscreen()}catch(e){}try{await screen.orientation.lock('landscape')}catch(e){}}
   else{try{if(document.fullscreenElement)await document.exitFullscreen()}catch(e){}try{screen.orientation.unlock()}catch(e){}}};
