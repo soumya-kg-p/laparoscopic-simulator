@@ -367,7 +367,7 @@ const distMat=new THREE.ShaderMaterial({uniforms:{t:{value:eyeRT.texture},k:{val
   vertexShader:'varying vec2 v;void main(){v=uv;gl_Position=vec4(position.xy,0.,1.);}',
   fragmentShader:['uniform sampler2D t;uniform float k;uniform float sx;varying vec2 v;','void main(){vec2 c=v*2.-1.;vec2 d=c*(1.+k*dot(c,c));vec2 u=d*.5+.5+vec2(sx,0.);','gl_FragColor=(u.x<0.||u.x>1.||u.y<0.||u.y>1.)?vec4(0.,0.,0.,1.):texture2D(t,u);','#include <tonemapping_fragment>','#include <colorspace_fragment>','}'].join('\n')});
 const qScene=new THREE.Scene();qScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2),distMat));const qCam=new THREE.OrthographicCamera(-1,1,1,-1,0,1);
-function resize(){cam.aspect=innerWidth/innerHeight;cam.fov=isVR?90:58;cam.updateProjectionMatrix();ren.setSize(innerWidth,innerHeight);updateEyeRTSize()}
+function resize(){cam.aspect=innerWidth/innerHeight;cam.fov=isVR?90:58;cam.updateProjectionMatrix();stereo.aspect=.5;ren.setSize(innerWidth,innerHeight);updateEyeRTSize()}
 function updateEyeRTSize(){
   if(isVR){
     eyeRT.setSize(Math.max(2,Math.floor(innerWidth/2)),Math.max(2,innerHeight));
@@ -376,17 +376,35 @@ function updateEyeRTSize(){
   }
 }
 function renderRoom(){
-  if(!isVR){ren.setViewport(0,0,innerWidth,innerHeight);ren.setScissorTest(false);ren.render(sA,cam);return}
-  const w=Math.floor(innerWidth/2),h=innerHeight,pr=ren.getPixelRatio();
-  eyeRT.setSize(Math.max(2,Math.floor(w*pr)),Math.max(2,Math.floor(h*pr)));
-  cam.updateMatrixWorld();stereo.update(cam);
-  distMat.uniforms.k.value=Number($('lens').value)/100*.55;const off=(Number($('align').value)-7.5)*.012;
-  [stereo.cameraL,stereo.cameraR].forEach((c,i)=>{
-    ren.setRenderTarget(eyeRT);ren.render(sA,c);ren.setRenderTarget(null);
-    distMat.uniforms.sx.value=i?-off:off;
-    ren.setScissorTest(true);
-    ren.setViewport(i*w,0,w,h);ren.setScissor(i*w,0,w,h);ren.render(qScene,qCam)});
-  ren.setScissorTest(false)}
+  // Normal monoscopic view
+  if(!isVR){
+    ren.setRenderTarget(null);
+    ren.setScissorTest(false);
+    ren.setViewport(0,0,innerWidth,innerHeight);
+    ren.render(sA,cam);
+    return;
+  }
+  // Correct side-by-side stereo: render each eye camera directly into its own half.
+  // Avoid copying each eye through a shared render texture, which can cause doubled/incorrect views.
+  const w=Math.floor(innerWidth/2),h=innerHeight;
+  cam.aspect=innerWidth/innerHeight;
+  cam.fov=90;
+  cam.updateProjectionMatrix();
+  cam.updateMatrixWorld(true);
+  stereo.aspect=0.5;
+  stereo.eyeSep=0.064;
+  stereo.update(cam);
+  ren.setRenderTarget(null);
+  ren.setScissorTest(true);
+  ren.setViewport(0,0,w,h);
+  ren.setScissor(0,0,w,h);
+  ren.clear(true,true,true);
+  ren.render(sA,stereo.cameraL);
+  ren.setViewport(w,0,innerWidth-w,h);
+  ren.setScissor(w,0,innerWidth-w,h);
+  ren.render(sA,stereo.cameraR);
+  ren.setScissorTest(false);
+}
 function moveCamera(dt){
   const f=Number(keys.KeyW||keys.ArrowUp)-Number(keys.KeyS||keys.ArrowDown),s2=Number(keys.KeyD||keys.ArrowRight)-Number(keys.KeyA||keys.ArrowLeft);if(!f&&!s2)return;
   const d=new THREE.Vector3(s2,0,-f).normalize().applyAxisAngle(Y,cam.rotation.y).multiplyScalar(1.4*dt);
